@@ -7,6 +7,7 @@
 //
 
 import UIKit
+import SKPhotoBrowser
 
 protocol UserProfileTableViewControllerDelegate {
     func didLikeUser()
@@ -17,7 +18,6 @@ protocol UserProfileTableViewControllerDelegate {
 class UserProfileTableViewController: UITableViewController {
 
     //MARK: - IBOutlets
-    
     @IBOutlet weak var sectionOneView: UIView!
     @IBOutlet weak var sectionTwoView: UIView!
     @IBOutlet weak var sectionThreeView: UIView!
@@ -32,25 +32,35 @@ class UserProfileTableViewController: UITableViewController {
     @IBOutlet weak var heightLabel: UILabel!
     @IBOutlet weak var lookingForLabel: UILabel!
     
+    @IBOutlet weak var dislikeButtonOutlet: UIButton!
     @IBOutlet weak var pageControl: UIPageControl!
+    @IBOutlet weak var likeButtonOutlet: UIButton!
+    @IBOutlet weak var activityIndicator: UIActivityIndicatorView!
+
     
     //MARK: - Vars
     var delegate: UserProfileTableViewControllerDelegate?
     var userObject: FUser?
     var notificationController: NotificationController!
+    
     private let sectionInsets = UIEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 5)
 
     var allImages: [UIImage] = []
     
     var currentWidth: CGFloat = 0
 
+    var isMatchedUser = false
+
+    
     //MARK: - View LifeCycle
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
         notificationController = NotificationController(_view: self.view)
+        pageControl.hidesForSinglePage = true
 
         if userObject != nil {
+            updateLikeButtonStatus()
             showUserDetails()
             loadImages()
         }
@@ -59,47 +69,61 @@ class UserProfileTableViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupBackgrounds()
+        hideActivityIndicator()
+
+        
+        if isMatchedUser {
+            updateUIForMatchedUser()
+        }
     }
 
     //MARK: - IBActions
     @IBAction func likeButtonPressed(_ sender: Any) {
+        
         self.delegate?.didLikeUser()
-        checkForLikesWith(userId: userObject!.objectId)
-
-    }
-    
-    @IBAction func dislikeButtonPressed(_ sender: Any) {
-        self.delegate?.didDislikeUser()
-        self.dismissView()
-
-    }
-    
-    //MARK: - Helpers
-
-    private func checkForLikesWith(userId: String) {
         
-        if !didLikeUserWith(userId: userId) {
-            saveLikeToUser(userId: userId)
-
-            let like = LikeObject(id: UUID().uuidString, userId: FUser.currentId(), likedUserId: userId)
-            like.saveToFirestore()
-        }
-        
-        //fetch likes
-        checkIfUserLikedUs(userId: userId) { (didLikeUs) in
-
-            if didLikeUs {
-                self.notificationController.showNotification(text: "It's a Match!!!", isError: false)
-                saveMatchWith(userId: userId)
-            }
+        if self.navigationController != nil {
+            saveLikeToUser(userId: userObject!.objectId)
+            FirebaseListener.shared.saveMatchWith(userId: userObject!.objectId)
+            showMatchView()
             
+//            navigationController?.popViewController(animated: true)
+        } else {
             self.dismissView()
         }
     }
+    
+    @IBAction func dislikeButtonPressed(_ sender: Any) {
+        
+        self.delegate?.didDislikeUser()
+        
+        if self.navigationController != nil {
+            navigationController?.popViewController(animated: true)
+        } else {
+            self.dismissView()
+        }
+    }
+    
+    @objc func startChatButtonClicked() {
+        let chatRoomId = startChat(user1: FUser.currentUser()!, user2: userObject!)
 
+        let privateChatView = ChatViewController(chatId: chatRoomId, recipientId: userObject!.objectId, recipientName: userObject!.username)
+
+        privateChatView.hidesBottomBarWhenPushed = true
+        navigationController?.pushViewController(privateChatView, animated: true)
+    }
+    
+    
+    //MARK: - Helpers
     private func dismissView() {
         self.dismiss(animated: true, completion: nil)
     }
+    
+    //MARK: - Update UI
+    private func updateLikeButtonStatus() {
+        likeButtonOutlet.isEnabled = !FUser.currentUser()!.likedIdArray!.contains(userObject!.objectId)
+    }
+
     
     //MARK: - Show user profile
     private func showUserDetails() {
@@ -110,6 +134,16 @@ class UserProfileTableViewController: UITableViewController {
         genderLabel.text = userObject!.isMale ? "Male" : "Female"
         heightLabel.text = String(format: "%.2f m", userObject!.height)
         lookingForLabel.text = userObject!.lookingFor
+    }
+
+    //MARK: - Navigation
+    private func showMatchView() {
+        
+        let profileView = UIStoryboard(name: "Main", bundle: nil).instantiateViewController(identifier: "matchView") as! MatchViewController
+
+        profileView.user = userObject!
+        profileView.delegate = self
+        self.present(profileView, animated: true, completion: nil)
     }
 
 
@@ -141,25 +175,60 @@ class UserProfileTableViewController: UITableViewController {
         sectionThreeView.layer.cornerRadius = 10
         sectionFourView.layer.cornerRadius = 10
     }
+    
+    private func updateUIForMatchedUser() {
+        self.likeButtonOutlet.isHidden = isMatchedUser
+        self.dislikeButtonOutlet.isHidden = isMatchedUser
+        
+        showStartChatButton()
+    }
+    
+    private func showStartChatButton() {
+        let messageButton = UIBarButtonItem(barButtonSystemItem: .compose, target: self, action: #selector(startChatButtonClicked))
+        
+        self.navigationItem.rightBarButtonItem = isMatchedUser ? messageButton : nil
+    }
+    
+    
+    //MARK: - Activity Indicator
+    
+    private func showActivityIndicator() {
+        self.activityIndicator.startAnimating()
+        self.activityIndicator.isHidden = false
+    }
+
+    private func hideActivityIndicator() {
+        self.activityIndicator.stopAnimating()
+        self.activityIndicator.isHidden = true
+
+    }
 
     //MARK: - LoadImages
     private func loadImages() {
         
-        allImages = [userObject!.avatar!]
+        let placeholder = userObject!.isMale ? "mPlaceholder" : "fPlaceholder"
+        let avatar = userObject!.avatar ?? UIImage(named: placeholder)
+        
+        allImages = [avatar!]
         self.setPageControlPages()
 
         collectionView.reloadData()
 
         if userObject!.imageLinks != nil && userObject!.imageLinks!.count > 0 {
+            showActivityIndicator()
+
             FileStorage.downloadImages(imageUrls: userObject!.imageLinks!) { (returnedImages) in
                 
                 self.allImages += returnedImages as! [UIImage]
                 self.setPageControlPages()
                 
                 DispatchQueue.main.async {
+                    self.hideActivityIndicator()
                     self.collectionView.reloadData()
                 }
             }
+        } else {
+            hideActivityIndicator()
         }
     }
 
@@ -172,8 +241,62 @@ class UserProfileTableViewController: UITableViewController {
     private func setSelectedPageTo(page: Int) {
         self.pageControl.currentPage = page
     }
+    
+    //MARK: - SKPhotoBrowser
+
+    private func showImages(_ images: [UIImage], startingIndex: Int) {
+        
+        var SKImages = [SKPhoto]()
+        
+        for image in images {
+            let photo = SKPhoto.photoWithImage(image)
+            SKImages.append(photo)
+        }
+        
+        let browser = SKPhotoBrowser(photos: SKImages)
+        browser.initializePageIndex(startingIndex)
+        self.present(browser, animated: true, completion: nil)
+    }
+    
+    //MARK: - Save Like
+    private func saveLikeToUser(userId: String) {
+        
+        let like = LikeObject(id: UUID().uuidString, userId: FUser.currentId(), likedUserId: userId, date: Date())
+        like.saveToFirestore()
+        
+        
+        if let currentUser = FUser.currentUser() {
+            
+            if !currentUser.likedIdArray!.contains(userId) {
+                currentUser.likedIdArray!.append(userId)
+                
+                currentUser.updateCurrentUserInFirestore(withValues: [kLIKEDIDARRAY: currentUser.likedIdArray!]) { (error) in
+                    print("updated likes with error ", error)
+                }
+            }
+        }
+    }
+    
+    private func createMatch(userId: String) {
+        FirebaseListener.shared.saveMatchWith(userId: userId)
+        self.showMatchView()
+    }
+
+    //MARK: - Navigation
+    private func goToChat() {
+        
+        let chatRoomId = startChat(user1: FUser.currentUser()!, user2: userObject!)
+        
+        let privateChatView = ChatViewController(chatId: chatRoomId, recipientId: userObject!.objectId, recipientName: userObject!.username)
+        
+        privateChatView.hidesBottomBarWhenPushed = true
+        navigationController?.pushViewController(privateChatView, animated: true)
+    }
+
 }
 
+
+//MARK: - CollectionViewDataSource
 extension UserProfileTableViewController : UICollectionViewDataSource {
     
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -186,7 +309,7 @@ extension UserProfileTableViewController : UICollectionViewDataSource {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "Cell", for: indexPath) as! ImageCollectionViewCell
         
         let countryCity = userObject!.country + ", " + userObject!.city
-        let nameAge = userObject!.username + ", \(userObject!.dateOfBirth.interval(ofComponent: .year, fromDate: Date()))"
+        let nameAge = userObject!.username + ", \(abs(userObject!.dateOfBirth.interval(ofComponent: .year, fromDate: Date())))"
 
 
         cell.setupCell(image: allImages[indexPath.row], countryCity: countryCity, nameAge: nameAge, indexPath: indexPath)
@@ -197,14 +320,14 @@ extension UserProfileTableViewController : UICollectionViewDataSource {
     
 }
 
-
+//MARK: - CollectionViewDelegate
 extension UserProfileTableViewController : UICollectionViewDelegate {
     
 
-
-
-
-    
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        
+        showImages(allImages, startingIndex: indexPath.row)
+    }
 }
 
 extension UserProfileTableViewController : UICollectionViewDelegateFlowLayout {
@@ -229,4 +352,20 @@ extension UserProfileTableViewController : UICollectionViewDelegateFlowLayout {
 
         return sectionInsets.left
     }
+}
+
+extension UserProfileTableViewController: MatchViewControllerDelegate {
+    
+    func didClickSendMessage(to user: FUser) {
+        goToChat()
+        updateLikeButtonStatus()
+
+    }
+    
+    func didClickKeepSwiping() {
+        updateLikeButtonStatus()
+    }
+    
+    
+    
 }

@@ -1,5 +1,5 @@
 //
-//  UserCardContentVimew.swift
+//  UserCardContentView.swift
 //  Dating
 //
 //  Created by David Kababyan on 02/03/2020.

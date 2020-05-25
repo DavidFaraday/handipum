@@ -7,24 +7,28 @@
 //
 
 import Foundation
+import UIKit
 
 struct MatchObject {
     
     let id: String
     let memberIds: [String]
+    let date: Date
     
     var dictionary : [String : Any] {
-         return [kOBJECTID : id, kMEMBERIDS : memberIds]
+        return [kOBJECTID : id, kMEMBERIDS : memberIds, kDATE : date]
     }
+
     
     func saveToFirestore() {
         FirebaseReference(.Match).document(self.id).setData(self.dictionary)
     }
+
 }
 
-func saveMatchWith(userId: String) {
-    
-    let match = MatchObject(id: UUID().uuidString, memberIds: [FUser.currentId(), userId])
-    match.saveToFirestore()
-}
+
+
+
+
+
 

@@ -1,5 +1,5 @@
 //
-//  FirebaseReferenc.swift
+//  FirebaseReference.swift
 //  Dating
 //
 //  Created by David Kababyan on 17/02/2020.
@@ -14,6 +14,9 @@ enum FCollectionReference: String {
     case User
     case Match
     case Like
+    case Recent
+    case Messages
+    case Typing
 }
 
 

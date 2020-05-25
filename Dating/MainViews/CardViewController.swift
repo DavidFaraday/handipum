@@ -34,19 +34,18 @@ class CardViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        overrideUserInterfaceStyle = .light
 
         setupActivityIndicator()
         showActivityIndicator()
 
-        let user = FUser.currentUser()!
-        user.likedIdArray = []
-        user.city = "My City"
-        user.country = "Country"
-        
-        user.saveUserToFirestore()
-        user.saveUserLocally()
+//        let user = FUser.currentUser()!
+//        user.likedIdArray = []
+//
+//        user.saveUserToFirestore()
+//        user.saveUserLocally()
 //        createUsers()
-        
+//        
         downloadInitialUsers()
         notificationController = NotificationController(_view: self.view)
     }
@@ -73,23 +72,29 @@ class CardViewController: UIViewController {
     //MARK: - DownloadUsers
     private func downloadInitialUsers() {
 
-        downloadUsersFromFirebase(isInitialLoad: isInitialLoad, limit: initialLoadNumber, lastDocumentSnapshot: lastDocumentSnapshot) { (allUsers, snapshot) in
+        FirebaseListener.shared.downloadUsersFromFirebase(isInitialLoad: isInitialLoad, limit: initialLoadNumber, lastDocumentSnapshot: lastDocumentSnapshot) { (allUsers, snapshot) in
             
+            if allUsers.count == 0 {
+                self.hideActivityIndicator()
+            }
+
             self.lastDocumentSnapshot = snapshot
             self.isInitialLoad = false
             self.cardModels = []
 
-            print("initial \(allUsers.count)")
             
             self.userObjects = allUsers
             
             for user in allUsers {
                 user.getUserAvatarFromFirestore { (didSet) in
 
-                    let cardModel = UserCardModel(id: user.objectId, name: user.username,
-                                  age: user.dateOfBirth.interval(ofComponent: .year, fromDate: Date()),
-                                  occupation: user.profession,
-                                  image: user.avatar)
+                    let placeholder = user.isMale ? "mPlaceholder" : "fPlaceholder"
+                    
+                    let cardModel = UserCardModel(id: user.objectId,
+                                                  name: user.username,
+                                                  age: abs(user.dateOfBirth.interval(ofComponent: .year, fromDate: Date())),
+                                                  occupation: user.profession,
+                                                  image: user.avatar ?? UIImage(named: placeholder))
                     
                     self.cardModels.append(cardModel)
                     self.numberOfCardsAdded += 1
@@ -100,13 +105,14 @@ class CardViewController: UIViewController {
                 }
             }
             
+            print("initial \(allUsers.count)")
             self.downloadMoreUsersInBackground()
         }
     }
     
     private func downloadMoreUsersInBackground() {
 
-        downloadUsersFromFirebase(isInitialLoad: isInitialLoad, limit: 1000, lastDocumentSnapshot: lastDocumentSnapshot) { (allUsers, snapshot) in
+        FirebaseListener.shared.downloadUsersFromFirebase(isInitialLoad: isInitialLoad, limit: 1000, lastDocumentSnapshot: lastDocumentSnapshot) { (allUsers, snapshot) in
             
             self.lastDocumentSnapshot = snapshot
             self.secondCardModels = []
@@ -119,7 +125,7 @@ class CardViewController: UIViewController {
                     
                     let cardModel = UserCardModel(id: user.objectId,
                                                   name: user.username,
-                                                  age: user.dateOfBirth.interval(ofComponent: .year, fromDate: Date()),
+                                                  age: abs(user.dateOfBirth.interval(ofComponent: .year, fromDate: Date())),
                                                   occupation: user.profession,
                                   image: user.avatar)
                     
@@ -135,16 +141,16 @@ class CardViewController: UIViewController {
         if !didLikeUserWith(userId: userId) {
             saveLikeToUser(userId: userId)
 
-            let like = LikeObject(id: UUID().uuidString, userId: FUser.currentId(), likedUserId: userId)
+            let like = LikeObject(id: UUID().uuidString, userId: FUser.currentId(), likedUserId: userId, date: Date())
             like.saveToFirestore()
         }
         
         //fetch likes
-        checkIfUserLikedUs(userId: userId) { (didLikeUs) in
+        FirebaseListener.shared.checkIfUserLikedUs(userId: userId) { (didLikeUs) in
 
             if didLikeUs {
-                self.notificationController.showNotification(text: "It's a Match!!!", isError: false)
-                saveMatchWith(userId: userId)
+                FirebaseListener.shared.saveMatchWith(userId: userId)
+                self.showMatchView(userId: userId)
             }
         }
     }
@@ -184,10 +190,31 @@ class CardViewController: UIViewController {
     private func showUserProfileFor(userId: String) {
         
         let profileView = UIStoryboard(name: "Main", bundle: nil).instantiateViewController(identifier: "ProfileTableView") as! UserProfileTableViewController
-        
+
         profileView.delegate = self
         profileView.userObject = getUserWithId(userId: userId)
         self.present(profileView, animated: true, completion: nil)
+    }
+
+    private func showMatchView(userId: String) {
+        
+        let matchView = UIStoryboard(name: "Main", bundle: nil).instantiateViewController(identifier: "matchView") as! MatchViewController
+
+        matchView.delegate = self
+        matchView.user = getUserWithId(userId: userId)
+        self.present(matchView, animated: true, completion: nil)
+    }
+
+    
+    //MARK: - Navigation
+    private func goToChat(user: FUser) {
+        
+        let chatRoomId = startChat(user1: FUser.currentUser()!, user2: user)
+
+        let privateChatView = ChatViewController(chatId: chatRoomId, recipientId: user.objectId, recipientName: user.username)
+        
+        privateChatView.hidesBottomBarWhenPushed = true
+        navigationController?.pushViewController(privateChatView, animated: true)
     }
 
 
@@ -200,7 +227,13 @@ extension CardViewController: SwipeCardStackDataSource, SwipeCardStackDelegate {
     func cardStack(_ cardStack: SwipeCardStack, cardForIndexAt index: Int) -> SwipeCard {
 
         let card = UserCard()
+        card.footerHeight = 80
+        card.swipeDirections = [.left, .right]
         
+        for direction in card.swipeDirections {
+          card.setOverlay(UserCardOverlay(direction: direction), forDirection: direction)
+        }
+
         card.configure(withModel: showReserve ? secondCardModels[index] : cardModels[index])
 
         return card
@@ -227,6 +260,8 @@ extension CardViewController: SwipeCardStackDataSource, SwipeCardStackDelegate {
     func cardStack(_ cardStack: SwipeCardStack, didSwipeCardAt index: Int, with direction: SwipeDirection) {
         
         if direction == .right {
+            let user = getUserWithId(userId: showReserve ? secondCardModels[index].id : cardModels[index].id)
+            
             checkForLikesWith(userId: showReserve ? secondCardModels[index].id : cardModels[index].id)
         }
     }
@@ -249,3 +284,17 @@ extension CardViewController: UserProfileTableViewControllerDelegate {
         cardStack.swipe(.left, animated: true)
     }
 }
+
+extension CardViewController: MatchViewControllerDelegate {
+    
+    func didClickSendMessage(to user: FUser) {
+        
+    }
+    
+        
+    func didClickKeepSwiping() {
+        
+    }
+}
+
+

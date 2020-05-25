@@ -29,7 +29,9 @@ class FUser {
 
     var likedIdArray: [String]?
     var imageLinks: [String]?
-
+    let registeredDate = Date()
+    var pushId: String?
+    
     //MARK: - Helper funcs
     var userDictionary: NSDictionary {
         
@@ -47,7 +49,9 @@ class FUser {
                                       self.lookingFor,
                                       self.avatarLink,
                                       self.likedIdArray ?? [],
-                                      self.imageLinks ?? []
+                                      self.imageLinks ?? [],
+                                      self.registeredDate,
+                                      self.pushId
             ],
                             forKeys: [kOBJECTID as NSCopying,
                                       kEMAIL as NSCopying,
@@ -63,7 +67,9 @@ class FUser {
                                       kLOOKINGFOR as NSCopying,
                                       kAVATARLINK as NSCopying,
                                       kLIKEDIDARRAY as NSCopying,
-                                      kIMAGELINKS as NSCopying
+                                      kIMAGELINKS as NSCopying,
+                                      kREGISTEREDDATE as NSCopying,
+                                      kREGISTEREDDATE as NSCopying
             ]
         )
     }
@@ -93,12 +99,12 @@ class FUser {
         imageLinks = []
     }
     
-    init(_dictionary: NSDictionary, _avatar: UIImage? = nil) {
+    init(_dictionary: NSDictionary) {
         
         objectId = _dictionary[kOBJECTID] as? String ?? ""
         email = _dictionary[kEMAIL] as? String ?? ""
         username = _dictionary[kUSERNAME] as? String ?? ""
-        dateOfBirth = (_dictionary[kDATEOFBIRTH] as? Timestamp)?.dateValue() ?? Date()
+
         isMale = _dictionary[kISMALE] as? Bool ?? true
         profession = _dictionary[kPROFESSION] as? String ?? ""
         jobTitle = _dictionary[kJOBTITLE] as? String ?? ""
@@ -110,7 +116,13 @@ class FUser {
         avatarLink = _dictionary[kAVATARLINK] as? String ?? ""
         imageLinks = _dictionary[kIMAGELINKS] as? [String]
         likedIdArray = _dictionary[kLIKEDIDARRAY] as? [String]
-        avatar = _avatar
+        pushId = _dictionary[kPUSHID] as? String ?? ""
+        
+        if let date = _dictionary[kDATEOFBIRTH] as? Timestamp {
+            dateOfBirth = date.dateValue()
+        } else {
+            dateOfBirth = _dictionary[kDATEOFBIRTH] as? Date ?? Date()
+        }
     }
     
 
@@ -131,10 +143,11 @@ class FUser {
 
     func getUserAvatarFromFirestore(completion: @escaping (_ didSet: Bool) -> Void) {
         
-        
         FileStorage.downloadImage(imageUrl: self.avatarLink) { (avatarImage) in
+            
+            let placeholder = self.isMale ? "mPlaceholder" : "fPlaceholder"
 
-            self.avatar = avatarImage
+            self.avatar = avatarImage ?? UIImage(named: placeholder)
             completion(true)
         }
     }
@@ -148,7 +161,7 @@ class FUser {
             if error == nil {
                 if authDataResult!.user.isEmailVerified {
                     
-                    downloadUserFromFirebase(userId: authDataResult!.user.uid, email: email)
+                    FirebaseListener.shared.downloadCurrentUserFromFirebase(userId: authDataResult!.user.uid, email: email)
                     completion(error, true)
                 } else {
                     print("Email is not verified")
@@ -162,7 +175,7 @@ class FUser {
     
     //MARK: - RegisterUser
     class func registerUserWith(email: String, password: String, userName: String, city: String, isMale: Bool, dateOfBirth: Date, completion: @escaping (_ error: Error?) -> Void ) {
-        
+
         Auth.auth().createUser(withEmail: email, password: password, completion: { (authDataResult, error) in
             
             completion(error)
@@ -238,6 +251,7 @@ class FUser {
     
     //MARK: - Save user funcs
     func saveUserToFirestore() {
+
         FirebaseReference(.User).document(self.objectId).setData(self.userDictionary as! [String : Any]) { (error) in
             if error != nil {
                 print("error saving user \(error!.localizedDescription)")
@@ -251,102 +265,32 @@ class FUser {
         userDefaults.set(self.userDictionary as! [String : Any], forKey: kCURRENTUSER)
         userDefaults.synchronize()
     }
+    
+    //MARK: - Update user func
+    func updateCurrentUserInFirestore(withValues : [String : Any], completion: @escaping (_ error: Error?) -> Void) {
+        
+        if let dictionary = userDefaults.object(forKey: kCURRENTUSER) {
+            //get user object from userDefaults and update its values
+            let userObject = (dictionary as! NSDictionary).mutableCopy() as! NSMutableDictionary
+            userObject.setValuesForKeys(withValues)
+            
+            FirebaseReference(.User).document(FUser.currentId()).updateData(withValues) { (error) in
+                
+                completion(error)
+                if error == nil {
+                    FUser(_dictionary: userObject).saveUserLocally()
+                }
+            }
+        }
+    }
 
 
 } // end of class
 
 
-//MARK: - DownloadUser
-func downloadUserFromFirebase(userId: String, email: String) {
-    
-    FirebaseReference(.User).document(userId).getDocument { (snapshot, error) in
-        guard let snapshot = snapshot else {  return }
-        
-        if snapshot.exists {
-
-            FUser(_dictionary: snapshot.data()! as NSDictionary).saveUserLocally()
-
-            //update email in case there was a change?
-            updateCurrentUserInFirestore(withValues: [kEMAIL : email]) { (error) in
-                
-            }
-        } else {
-            //first login save to firebase
-            if let user = userDefaults.object(forKey: kCURRENTUSER) {
-                
-                FUser(_dictionary: user as! NSDictionary).saveUserToFirestore()
-            }
-        }
-    }
-}
-
-func downloadUsersFromFirebase(isInitialLoad: Bool, limit: Int, lastDocumentSnapshot: DocumentSnapshot?, completion: @escaping (_ users: [FUser], _ snapshot: DocumentSnapshot?) -> Void ) {
-    
-    
-    var query: Query!
-
-    if isInitialLoad {
-        query = FirebaseReference(.User).limit(to: limit)
-        print("First \(limit) users loaded")
-    } else {
-        if lastDocumentSnapshot != nil {
-            query = FirebaseReference(.User).limit(to: limit).start(afterDocument: lastDocumentSnapshot!).limit(to: limit)
-            print("Next \(limit) users loaded")
-        } else {
-            print("last snap is nil")
-        }
-    }
-    
-    query.getDocuments { (snapshot, error) in
-        
-        
-        guard let snapshot = snapshot else {  return }
-        
-        var users:[FUser] = []
-
-        if !snapshot.isEmpty {
-
-            for userData in snapshot.documents {
-                
-                let userObject = userData.data() as NSDictionary
-                
-                //removed liked users
-                if !(FUser.currentUser()?.likedIdArray?.contains(userData[kOBJECTID] as! String) ?? false) && FUser.currentId() != userData[kOBJECTID] as! String {
-                    users.append(FUser(_dictionary: userObject))//image placeholder here
-                }
-            }
-
-            completion(users, snapshot.documents.last!)
-
-        } else {
-            print("no more users to fetch!")
-            completion(users, nil)
-        }
-    }
-}
 
 
 
-
-
-
-//MARK: - Update user func
-func updateCurrentUserInFirestore(withValues : [String : Any], completion: @escaping (_ error: Error?) -> Void) {
-    
-    if let dictionary = userDefaults.object(forKey: kCURRENTUSER) {
-        //get user object from userDefaults and update its values
-        let userObject = (dictionary as! NSDictionary).mutableCopy() as! NSMutableDictionary
-        userObject.setValuesForKeys(withValues)
-        
-        FirebaseReference(.User).document(FUser.currentId()).updateData(withValues) { (error) in
-            
-            completion(error)
-            if error == nil {
-                FUser(_dictionary: userObject).saveUserLocally()
-            }
-        }
-    }
-}
 
 
 
@@ -359,12 +303,12 @@ func createUsers() {
     var isMale = true
     var UserIndex = 1
 
-    for _ in 0..<20 {
+    for _ in 0..<5 {
 
         let id = UUID().uuidString
         let randomNumber = Int.random(in: 0 ... 5)
         
-        let fileDirectory = "Avatar/" + "\(FUser.currentId())" + ".jpg"
+        let fileDirectory = "Avatars/" + "\(id)" + ".jpg"
 
         FileStorage.uploadImage(UIImage(named: "user\(ImageIndex)")!, directory: fileDirectory) { (avatarLink) in
             
@@ -373,7 +317,6 @@ func createUsers() {
             isMale = !isMale
             UserIndex += 1
             user.saveUserToFirestore()
-
         }
 
         ImageIndex += 1

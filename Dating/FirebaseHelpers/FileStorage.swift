@@ -41,13 +41,12 @@ class FileStorage {
                         completion(nil)
                         return
                     }
-                    print("uploaded \(directory)")
+
                     completion(downloadUrl.absoluteString)
                 })
                 
             })
             
-
         } else {
             print("No Internet Connection!")
         }
@@ -91,34 +90,48 @@ class FileStorage {
 
     class func downloadImage(imageUrl: String, completion: @escaping (_ image: UIImage?) -> Void) {
         
-        if imageUrl != "" {
+        let imageFileName = (imageUrl.components(separatedBy: "_").last!).components(separatedBy: "?").first!
 
-            let documentURL = URL(string: imageUrl)
+        if fileExistsAtPath(path: imageFileName) {
+
+            if let contentsOfFile = UIImage(contentsOfFile: fileInDocumentsDirectory(filename: imageFileName)) {
+                completion(contentsOfFile)
+            } else {
+                print("couldn't generate local image")
+                completion(UIImage(named: "samplePhoto"))
+            }
             
-            let downloadQueue = DispatchQueue(label: "imageDownloadQueue")
+        } else {
+            
+            if imageUrl != "" {
 
-            downloadQueue.async {
+                let documentURL = URL(string: imageUrl)
                 
-                let data = NSData(contentsOf: documentURL!)
-                
-                if data != nil {
-                                
-                    let imageToReturn = UIImage(data: data! as Data)
+                let downloadQueue = DispatchQueue(label: "imageDownloadQueue")
+
+                downloadQueue.async {
                     
-                    DispatchQueue.main.async {
-                        completion(imageToReturn!)
-                    }
+                    let data = NSData(contentsOf: documentURL!)
                     
-                } else {
-                    DispatchQueue.main.async {
-                        print("No document in database")
-                        completion(nil)
+                    if data != nil {
+                                    
+                        let imageToReturn = UIImage(data: data! as Data)
+                        
+                        DispatchQueue.main.async {
+                            completion(imageToReturn!)
+                        }
+                        
+                    } else {
+                        DispatchQueue.main.async {
+                            print("No document in database")
+                            completion(nil)
+                        }
                     }
                 }
-            }
 
-        } else {
-            completion(UIImage(named: "samplePhoto"))
+            } else {
+                completion(UIImage(named: "samplePhoto"))
+            }
         }
     }
     
@@ -184,3 +197,21 @@ func getDocumentsURL() -> URL {
 
     return documentURL!
 }
+
+
+func fileExistsAtPath(path: String) -> Bool {
+    
+    var doesExist = false
+    
+    let filePath = fileInDocumentsDirectory(filename: path)
+    let fileManager = FileManager.default
+    
+    if fileManager.fileExists(atPath: filePath) {
+        doesExist = true
+    } else {
+        doesExist = false
+    }
+    
+    return doesExist
+}
+

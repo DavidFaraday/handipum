@@ -46,6 +46,8 @@ class ProfileTableViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        overrideUserInterfaceStyle = .dark
+
         notificationController = NotificationController(_view: self.view)
 
         setupBackgrounds()
@@ -118,7 +120,7 @@ class ProfileTableViewController: UITableViewController {
         let currentUser = FUser.currentUser()!
         
         avatarImageView.image = currentUser.avatar != nil ? currentUser.avatar?.circleMasked : UIImage(named: "avatar")
-        nameAgeLabel.text = currentUser.username + ",  \(currentUser.dateOfBirth.interval(ofComponent: .year, fromDate: Date()))"
+        nameAgeLabel.text = currentUser.username + ",  \(abs(currentUser.dateOfBirth.interval(ofComponent: .year, fromDate: Date())))"
         cityCountryLabel.text = currentUser.country + ", " + currentUser.city
         aboutMeTextView.text = currentUser.about != "" ? currentUser.about : "A little bit about you..."
         jobTextField.text = currentUser.jobTitle

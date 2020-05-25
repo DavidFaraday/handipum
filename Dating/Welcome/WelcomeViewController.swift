@@ -14,7 +14,7 @@ class WelcomeViewController: UIViewController {
     //MARK: - IBOutlets
     @IBOutlet weak var emailTextField: UITextField!
     @IBOutlet weak var passwordTextField: UITextField!
-    
+    @IBOutlet weak var backgroundView: UIImageView!
     
     
     //MARK: - VARs
@@ -37,13 +37,14 @@ class WelcomeViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        overrideUserInterfaceStyle = .dark
 
         activityIndicator = ActivityIndicator(_view: self.view)
         notificationController = NotificationController(_view: self.view)
+        setupBackgroundTouch()
     }
 
     //MARK: - IBACTIONS
-    
 
     @IBAction func forgotPasswordButtonPressed(_ sender: Any) {
         
@@ -101,7 +102,17 @@ class WelcomeViewController: UIViewController {
         
     }
     
+    @objc func backgroundTap() {
+        self.view.endEditing(false)
+    }
     
+    //MARK: - Setup
+    private func setupBackgroundTouch() {
+        backgroundView.isUserInteractionEnabled = true
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(backgroundTap))
+        backgroundView.addGestureRecognizer(tapGesture)
+    }
+
     //MARK: - Navigation
     
     private func goToApp() {

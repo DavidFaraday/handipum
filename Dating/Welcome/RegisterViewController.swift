@@ -33,7 +33,8 @@ class RegisterViewController: UIViewController {
     //MARK: - ViewLifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+        overrideUserInterfaceStyle = .dark
+
         activityIndicator = ActivityIndicator(_view: self.view)
         notificationController = NotificationController(_view: self.view)
         
